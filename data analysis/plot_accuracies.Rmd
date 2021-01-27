@@ -1,0 +1,183 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(dplyr)
+library(ggplot2)
+df = read.csv("data/accuracies.csv")
+method = read.csv("data/method.csv")
+```
+
+
+```{r}
+df <- df %>% filter(user_id %in% c(method$user_id))
+df <- merge(x = df, y = method[ , c("method", "uid", "user_id")], by = "user_id")
+```
+
+
+```{r}
+df.mean <- df %>% group_by(uid, method) %>% 
+  dplyr::summarise(mean = round(mean(accuracy),2),
+                   sd = round(sd(accuracy),2))
+df.mean
+xtable(df.mean)
+```
+
+
+```{r}
+df.mean %>% group_by(method) %>% 
+  dplyr::summarise(mean = round(mean(mean),2),
+                   sd = round(sd(sd),2))
+```
+
+```{r geom_flat_violin}
+library(cowplot)
+library(readr)
+
+"%||%" <- function(a, b) {
+  if (!is.null(a)) a else b
+}
+
+geom_flat_violin <- function(mapping = NULL, data = NULL, stat = "ydensity",
+                             position = "dodge", trim = TRUE, scale = "area",
+                             show.legend = NA, inherit.aes = TRUE, ...) {
+  layer(
+    data = data,
+    mapping = mapping,
+    stat = stat,
+    geom = GeomFlatViolin,
+    position = position,
+    show.legend = show.legend,
+    inherit.aes = inherit.aes,
+    params = list(
+      trim = trim,
+      scale = scale,
+      ...
+    )
+  )
+}
+#' @rdname ggplot2-ggproto
+#' @format NULL
+#' @usage NULL
+#' @export
+GeomFlatViolin <-
+  ggproto("GeomFlatViolin", Geom,
+    setup_data = function(data, params) {
+      data$width <- data$width %||%
+        params$width %||% (resolution(data$x, FALSE) * 0.9)
+
+      # ymin, ymax, xmin, and xmax define the bounding rectangle for each group
+      data %>%
+        group_by(group) %>%
+        mutate(
+          ymin = min(y),
+          ymax = max(y),
+          xmin = x,
+          xmax = x + width / 2
+        )
+    },
+
+    draw_group = function(data, panel_scales, coord) {
+      # Find the points for the line to go all the way around
+      data <- transform(data,
+        xminv = x,
+        xmaxv = x + violinwidth * (xmax - x)
+      )
+
+      # Make sure it's sorted properly to draw the outline
+      newdata <- rbind(
+        plyr::arrange(transform(data, x = xminv), y),
+        plyr::arrange(transform(data, x = xmaxv), -y)
+      )
+
+      # Close the polygon: set first and last point the same
+      # Needed for coord_polar and such
+      newdata <- rbind(newdata, newdata[1, ])
+
+      ggplot2:::ggname("geom_flat_violin", GeomPolygon$draw_panel(newdata, panel_scales, coord))
+    },
+
+    draw_key = draw_key_polygon,
+
+    default_aes = aes(
+      weight = 1, colour = "grey20", fill = "white", size = 0.5,
+      alpha = NA, linetype = "solid"
+    ),
+
+    required_aes = c("x", "y")
+  )
+
+# summarySE function
+summarySE <- function(data = NULL, measurevar, groupvars = NULL, na.rm = FALSE,
+                      conf.interval = .95, .drop = TRUE) {
+  library(plyr)
+
+  # New version of length which can handle NA's: if na.rm==T, don't count them
+  length2 <- function(x, na.rm = FALSE) {
+    if (na.rm) {
+      sum(!is.na(x))
+    } else {
+      length(x)
+    }
+  }
+
+  # This does the summary. For each group's data frame, return a vector with
+  # N, mean, median, and sd
+
+  datac <- plyr::ddply(data, groupvars, .drop=.drop,
+                   .fun = function(xx, col) {
+                       c(N      = length2(xx[[col]], na.rm=na.rm),
+                         mean   = mean(xx[[col]], na.rm=na.rm),
+                         median = median(xx[[col]], na.rm=na.rm),
+                         sd      = sd(xx[[col]], na.rm=na.rm)
+                       )
+                   },
+                   measurevar
+  )
+  
+  # Rename the "mean" and "median" columns    
+ datac <- plyr::rename(datac, c("mean" = paste(measurevar, "_mean", sep = "")))
+ datac <- plyr::rename(datac, c("median" = paste(measurevar, "_median", sep = "")))
+  
+ datac$se <- datac$sd / sqrt(datac$N)  # Calculate standard error of the mean
+
+  # Confidence interval multiplier for standard error
+  # Calculate t-statistic for confidence interval:
+  # e.g., if conf.interval is .95, use .975 (above/below), and use df=N-1
+  ciMult <- qt(conf.interval / 2 + .5, datac$N - 1)
+  datac$ci <- datac$se * ciMult
+
+  return(datac)
+}
+```
+
+```{r summarySE}
+df.sum <- summarySE(df, measurevar = "accuracy", groupvars=c("method", "uid"))
+```
+
+```{r, plot}
+cbp1 <- c("#A680B8", "#67AB9F")
+#Rainclouds for repeated measures, additional plotting options 
+p11 <- ggplot(df, aes(x = factor(uid), y = accuracy, fill = method)) +
+  geom_flat_violin(aes(fill = method),position = position_nudge(x = .2, y = 0), adjust = 1.5, trim = FALSE, alpha = .5, colour = NA)+
+  geom_point(aes(x = as.numeric(factor(uid))-.2, y = accuracy, colour = method),position = position_jitter(width = .05), size = .25, shape = 20)+
+  geom_boxplot(aes(x = factor(uid), y = accuracy, fill = method),outlier.shape = NA, alpha = .5, width = .2, colour = "black")+
+  geom_errorbar(data = df.sum, aes(x = as.numeric(factor(uid))+.2, y = accuracy_mean, group = method, colour = method, ymin = accuracy_mean-se, ymax = accuracy_mean+se), width = .05)+
+  scale_colour_manual(values = cbp1)+
+  scale_fill_manual(values = cbp1) + 
+  ylab("AUC") + xlab("User ID") +
+  theme_bw() +
+  theme(legend.position="right") +
+  theme(legend.title=element_blank()) 
+p11
+ggsave("fig/ggplot_accuracy.pdf", device = "pdf",plot = p11,
+       dpi = 300, height = 3, width = 8)
+```
+
+
+
+
+
+

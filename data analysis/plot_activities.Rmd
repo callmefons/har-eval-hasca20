@@ -1,0 +1,43 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(dplyr)
+library(ggplot2)
+df.act = read.csv("data/activities.csv")
+```
+
+
+```{r summarize acts}
+df.act %>% dplyr::summarise(sum = sum(freq))
+```
+
+
+```{r plot}
+cbp1 <- c("#67AB9F", "#A680B8")
+ggplot_df.act <- ggplot(data=df.act, aes(x=reorder(activity, freq), y=freq, label=freq, fill=factor(method, levels=c("Proposed","Baseline")))) +
+  geom_bar(stat="identity", alpha = .8) +
+  geom_text(size = 3, position = position_stack(vjust = 0.5)) +
+  scale_fill_manual(values = cbp1) +
+  theme_bw() +
+  theme(legend.position = "top", legend.title=element_blank(), axis.text.x = element_text(angle = 0, hjust = 1)) +
+  xlab("Activity classes") + ylab("Labels") 
+ggplot_df.act
+ggsave("fig/ggplot_activities.pdf", device = "pdf",plot = ggplot_df.act,
+       dpi = 300, height = 3.5, width = 5)
+```
+
+```{r t test}
+peoposed_age <- c(24, 26, 25, 27, 27)
+baseline_age <- c(25, 27, 26, 26, 27) 
+my_data <- data.frame( 
+                group = rep(c("Proposed", "Baseline"), each = 5),
+                age = c(peoposed_age,  baseline_age)
+                )
+t.test(age ~ group, data = my_data)
+```
+
+
+
